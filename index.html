@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="PyData — a single-file browser database application powered by PyScript, SQLite, HTMX, Alpine.js, Motion, and Tailwind CSS.">
+  <title>PyData — Browser SQLite Data Manager</title>
+
+  <!-- Tailwind CSS Play CDN: intentional for a zero-build, single-file project. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- HTMX 2.0.10 -->
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"></script>
+
+  <!-- Alpine.js 3.15.12 -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js"></script>
+
+  <!-- Motion 13.0.0 -->
+  <script type="module">
+    import { animate, stagger } from "https://cdn.jsdelivr.net/npm/motion@13.0.0/+esm";
+    window.PyDataMotion = { animate, stagger };
+  </script>
+
+  <!-- PyScript 2026.7.1 -->
+  <link rel="stylesheet" href="https://pyscript.net/releases/2026.7.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2026.7.1/core.js"></script>
+
+  <style>
+    [x-cloak] { display: none !important; }
+    body { background: #f8fafc; }
+    .glass { background: rgba(255,255,255,.82); backdrop-filter: blur(14px); }
+    .table-scrollbar::-webkit-scrollbar { height: 10px; width: 10px; }
+    .table-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    .table-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+    .table-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+
+<body
+  x-data="pydataApp()"
+  x-init="boot()"
+  x-cloak
+  hx-on:pydata-refresh="window.dispatchEvent(new CustomEvent('pydata-refresh-requested'))"
+  class="min-h-screen text-slate-900 antialiased"
+>
+  <header class="sticky top-0 z-40 border-b border-slate-200/80 glass shadow-sm">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+      <div class="flex items-center gap-3">
+        <div class="grid h-11 w-11 place-items-center rounded-2xl bg-slate-900 text-white shadow-lg shadow-slate-900/15">
+          <span class="text-lg font-black">Py</span>
+        </div>
+        <div>
+          <div class="text-xl font-black tracking-tight">PyData</div>
+          <div class="text-xs font-medium text-slate-500">Single-file browser database</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300"
+          @click="toggleTheme()"
+          :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
+        >
+          <span x-text="dark ? '☀️' : '🌙'"></span>
+        </button>
+        <span
+          id="engine-status"
+          class="hidden rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-200 sm:inline-flex"
+        >Loading Python…</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <section id="hero" class="mb-6 overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 p-6 text-white shadow-2xl shadow-slate-900/15 sm:p-8">
+      <div class="grid gap-8 lg:grid-cols-[1.5fr_1fr] lg:items-end">
+        <div>
+          <div class="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold tracking-wide text-slate-200">
+            <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+            PYTHON + SQLITE + WEB APIs
+          </div>
+          <h1 class="max-w-3xl text-3xl font-black tracking-tight sm:text-5xl">A local-first data workspace that runs entirely in your browser.</h1>
+          <p class="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
+            PyScript owns the SQLite database and every CRUD operation. HTMX handles declarative browser events, Alpine.js manages UI state, Motion adds interaction feedback, and Tailwind CSS provides the interface.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div class="text-2xl font-black" id="stat-total">0</div>
+            <div class="mt-1 text-xs font-medium text-slate-300">Rows</div>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div class="text-2xl font-black" id="stat-visible">0</div>
+            <div class="mt-1 text-xs font-medium text-slate-300">Visible</div>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div class="text-2xl font-black" id="stat-categories">0</div>
+            <div class="mt-1 text-xs font-medium text-slate-300">Categories</div>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div class="text-2xl font-black" id="stat-engine">SQLite</div>
+            <div class="mt-1 text-xs font-medium text-slate-300">Engine</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid gap-6 lg:grid-cols-[360px_1fr]">
+      <!-- Form / controls -->
+      <aside class="space-y-6">
+        <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-base font-black">Record editor</h2>
+              <p class="mt-1 text-xs leading-5 text-slate-500">Create or update a SQLite row.</p>
+            </div>
+            <span id="edit-mode" class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">NEW</span>
+          </div>
+
+          <form id="record-form" class="mt-5 space-y-4" novalidate hx-on:submit="event.preventDefault()">
+            <input type="hidden" id="record-id" value="">
+            <label class="block">
+              <span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Name</span>
+              <input id="record-name" required maxlength="120" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none ring-0 transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" placeholder="e.g. Revenue report">
+            </label>
+            <label class="block">
+              <span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Category</span>
+              <input id="record-category" required maxlength="80" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" placeholder="e.g. Finance">
+            </label>
+            <label class="block">
+              <span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Value</span>
+              <input id="record-value" maxlength="160" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" placeholder="e.g. 2026-08 monthly close">
+            </label>
+            <label class="block">
+              <span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Notes</span>
+              <textarea id="record-notes" maxlength="600" rows="4" class="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" placeholder="Optional notes"></textarea>
+            </label>
+
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <button id="save-button" type="button" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-900/15 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50" disabled
+                hx-on:click="this.dataset.busy = 'true'; this.setAttribute('aria-busy','true')">
+                Save record
+              </button>
+              <button id="clear-button" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-300" 
+                hx-on:click="window.dispatchEvent(new CustomEvent('pydata-clear'))">
+                Clear
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div>
+            <h2 class="text-base font-black">CSV exchange</h2>
+            <p class="mt-1 text-xs leading-5 text-slate-500">Move all visible database records between PyData and a CSV file.</p>
+          </div>
+          <div class="mt-4 grid gap-2">
+            <button id="export-button" type="button" class="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-300" disabled
+              hx-on:click="window.dispatchEvent(new CustomEvent('pydata-export'))">
+              <span>↓</span> Export CSV
+            </button>
+            <button id="import-button" type="button" class="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/20 transition hover:-translate-y-0.5 hover:bg-indigo-500" disabled
+              hx-on:click="document.getElementById('csv-input').click()">
+              <span>↑</span> Import CSV
+            </button>
+            <input id="csv-input" type="file" accept=".csv,text/csv" class="hidden">
+          </div>
+          <div class="mt-4 rounded-2xl bg-slate-50 p-3 text-[11px] leading-5 text-slate-500">
+            Import replaces the current table contents and keeps the database in memory. Reloading the page starts a fresh database.
+          </div>
+        </div>
+      </aside>
+
+      <!-- Data table -->
+      <section class="min-w-0 rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div class="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 class="text-lg font-black">Live data</h2>
+            <p class="mt-1 text-xs leading-5 text-slate-500">Every row shown here is queried from SQLite by PyScript.</p>
+          </div>
+          <div class="flex w-full max-w-md gap-2">
+            <label class="relative flex-1">
+              <span class="sr-only">Search</span>
+              <input id="search-input" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" placeholder="Search name, category, value, notes…">
+            </label>
+            <button id="refresh-button" type="button" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-300" disabled
+              hx-on:click="window.dispatchEvent(new CustomEvent('pydata-refresh-requested'))">
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div class="table-scrollbar max-h-[650px] overflow-auto">
+          <table class="min-w-[920px] w-full text-left text-sm">
+            <thead class="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th class="px-5 py-3 font-black">ID</th>
+                <th class="px-5 py-3 font-black">Name</th>
+                <th class="px-5 py-3 font-black">Category</th>
+                <th class="px-5 py-3 font-black">Value</th>
+                <th class="px-5 py-3 font-black">Notes</th>
+                <th class="px-5 py-3 font-black">Created</th>
+                <th class="px-5 py-3 font-black">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="data-body" class="divide-y divide-slate-100"></tbody>
+          </table>
+
+          <div id="empty-state" class="hidden px-6 py-16 text-center">
+            <div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-2xl">🗃️</div>
+            <h3 class="mt-4 text-sm font-black">No records found</h3>
+            <p class="mx-auto mt-1 max-w-md text-xs leading-5 text-slate-500">Create a record, clear the search, or import a CSV file.</p>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2 border-t border-slate-100 p-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <div id="db-message" aria-live="polite">Initializing database…</div>
+          <div class="flex items-center gap-3">
+            <span>Python: <strong id="python-version">—</strong></span>
+            <span>SQLite: <strong id="sqlite-version">—</strong></span>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="mx-auto max-w-7xl px-4 pb-8 pt-2 text-xs text-slate-400 sm:px-6 lg:px-8">
+    PyData is a static browser application. No application server or API is required.
+  </footer>
+
+  <!-- All application logic below is PyScript; no external Python file is required. -->
+  <script type="py">
+import csv
+import io
+import sqlite3
+import datetime as dt
+import re
+
+from pyscript import document, window, ffi
+
+# -----------------------------------------------------------------------------
+# PyData: browser-local SQLite database
+# -----------------------------------------------------------------------------
+
+DB = sqlite3.connect(":memory:")
+DB.row_factory = sqlite3.Row
+
+COLUMNS = ["id", "name", "category", "value", "notes", "created_at"]
+
+
+def el(element_id):
+    """Return a DOM element by ID."""
+    return document.getElementById(element_id)
+
+
+def set_text(element_id, value):
+    element = el(element_id)
+    if element is not None:
+        element.textContent = str(value)
+
+
+def set_disabled(element_id, disabled):
+    element = el(element_id)
+    if element is not None:
+        element.disabled = disabled
+
+
+def set_message(message, kind="info"):
+    element = el("db-message")
+    if element is None:
+        return
+    element.textContent = message
+    if kind == "error":
+        element.className = "text-rose-600 font-semibold"
+    elif kind == "success":
+        element.className = "text-emerald-600 font-semibold"
+    else:
+        element.className = "text-slate-500"
+
+
+def escape_html(value):
+    """Escape text before inserting it into generated table HTML."""
+    text = "" if value is None else str(value)
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#39;")
+    )
+
+
+def init_db():
+    DB.execute(
+        """
+        CREATE TABLE records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    samples = [
+        ("Revenue report", "Finance", "2026-08 monthly close", "Sample record created by PyData."),
+        ("Product roadmap", "Planning", "Q4 2026", "Import/export can replace these rows."),
+        ("Customer feedback", "Research", "12 interviews", "Search works across every text column."),
+        ("Deployment checklist", "Engineering", "Production ready", "A static host is enough to run PyData."),
+    ]
+    DB.executemany(
+        "INSERT INTO records (name, category, value, notes, created_at) VALUES (?, ?, ?, ?, ?)",
+        [(*row, now_string()) for row in samples],
+    )
+    DB.commit()
+
+
+def now_string():
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def all_rows(search=""):
+    query = """
+        SELECT id, name, category, value, notes, created_at
+        FROM records
+    """
+    parameters = []
+    search = (search or "").strip()
+    if search:
+        query += """
+            WHERE name LIKE ? COLLATE NOCASE
+               OR category LIKE ? COLLATE NOCASE
+               OR value LIKE ? COLLATE NOCASE
+               OR notes LIKE ? COLLATE NOCASE
+        """
+        token = f"%{search}%"
+        parameters = [token, token, token, token]
+    query += " ORDER BY id DESC"
+    return DB.execute(query, parameters).fetchall()
+
+
+def count_categories():
+    return DB.execute("SELECT COUNT(DISTINCT category) FROM records").fetchone()[0]
+
+
+def validate_field(value, label, max_length):
+    value = (value or "").strip()
+    if not value:
+        raise ValueError(f"{label} is required.")
+    if len(value) > max_length:
+        raise ValueError(f"{label} is too long (maximum {max_length} characters).")
+    return value
+
+
+def read_form():
+    return {
+        "id": (el("record-id").value or "").strip(),
+        "name": validate_field(el("record-name").value, "Name", 120),
+        "category": validate_field(el("record-category").value, "Category", 80),
+        "value": (el("record-value").value or "").strip()[:160],
+        "notes": (el("record-notes").value or "").strip()[:600],
+    }
+
+
+def clear_form(_event=None):
+    el("record-id").value = ""
+    el("record-name").value = ""
+    el("record-category").value = ""
+    el("record-value").value = ""
+    el("record-notes").value = ""
+    set_text("edit-mode", "NEW")
+    set_message("Ready for a new record.")
+    animate_form_reset()
+
+
+def fill_form(record):
+    el("record-id").value = str(record["id"])
+    el("record-name").value = record["name"]
+    el("record-category").value = record["category"]
+    el("record-value").value = record["value"]
+    el("record-notes").value = record["notes"]
+    set_text("edit-mode", f"EDIT #{record['id']}")
+    set_message(f"Editing record #{record['id']}.")
+    document.getElementById("record-name").focus()
+
+
+def save_record(_event=None):
+    try:
+        data = read_form()
+        if data["id"]:
+            DB.execute(
+                """
+                UPDATE records
+                   SET name = ?, category = ?, value = ?, notes = ?
+                 WHERE id = ?
+                """,
+                (data["name"], data["category"], data["value"], data["notes"], int(data["id"])),
+            )
+            message = f"Updated record #{data['id']}."
+        else:
+            DB.execute(
+                """
+                INSERT INTO records (name, category, value, notes, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (data["name"], data["category"], data["value"], data["notes"], now_string()),
+            )
+            message = "Created a new record."
+        DB.commit()
+        clear_form()
+        refresh()
+        set_message(message, "success")
+        trigger_htmx_refresh()
+    except Exception as exc:
+        set_message(str(exc), "error")
+    finally:
+        button = el("save-button")
+        if button is not None:
+            button.dataset.busy = "false"
+            button.removeAttribute("aria-busy")
+
+
+def delete_record(record_id):
+    try:
+        DB.execute("DELETE FROM records WHERE id = ?", (int(record_id),))
+        DB.commit()
+        refresh()
+        set_message(f"Deleted record #{record_id}.", "success")
+        trigger_htmx_refresh()
+    except Exception as exc:
+        set_message(str(exc), "error")
+
+
+def edit_record(record_id):
+    row = DB.execute("SELECT * FROM records WHERE id = ?", (int(record_id),)).fetchone()
+    if row:
+        fill_form(row)
+
+
+def refresh(_event=None):
+    search = (el("search-input").value or "").strip()
+    rows = all_rows(search)
+    body = el("data-body")
+    empty_state = el("empty-state")
+    if body is None:
+        return
+
+    rendered = []
+    for row in rows:
+        rendered.append(
+            f"""
+            <tr class='group transition hover:bg-indigo-50/40'>
+              <td class='whitespace-nowrap px-5 py-4 align-top font-mono text-xs font-bold text-slate-500'>#{row['id']}</td>
+              <td class='min-w-[180px] px-5 py-4 align-top font-semibold text-slate-900'>{escape_html(row['name'])}</td>
+              <td class='px-5 py-4 align-top'>
+                <span class='inline-flex rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700'>{escape_html(row['category'])}</span>
+              </td>
+              <td class='max-w-[240px] px-5 py-4 align-top text-slate-700'>{escape_html(row['value'])}</td>
+              <td class='max-w-[320px] px-5 py-4 align-top text-slate-500'>{escape_html(row['notes'])}</td>
+              <td class='whitespace-nowrap px-5 py-4 align-top font-mono text-[11px] text-slate-400'>{escape_html(row['created_at'])}</td>
+              <td class='whitespace-nowrap px-5 py-4 align-top'>
+                <div class='flex gap-2 opacity-70 transition group-hover:opacity-100'>
+                  <button type='button' data-action='edit' data-id='{row['id']}' class='rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:border-indigo-300 hover:text-indigo-700'>Edit</button>
+                  <button type='button' data-action='delete' data-id='{row['id']}' class='rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50'>Delete</button>
+                </div>
+              </td>
+            </tr>
+            """
+        )
+    body.innerHTML = "".join(rendered)
+    empty_state.classList.toggle("hidden", bool(rows))
+
+    total = DB.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+    set_text("stat-total", total)
+    set_text("stat-visible", len(rows))
+    set_text("stat-categories", count_categories())
+    set_message(f"Loaded {len(rows)} of {total} record(s) from SQLite.")
+    set_text("python-version", python_version())
+    set_text("sqlite-version", sqlite3.sqlite_version)
+
+    animate_rows()
+
+
+def python_version():
+    import sys
+    return f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+
+def handle_table_click(event):
+    target = event.target
+    action = target.getAttribute("data-action") if target else None
+    if not action:
+        return
+    record_id = target.getAttribute("data-id")
+    if action == "edit":
+        edit_record(record_id)
+    elif action == "delete":
+        answer = window.confirm(f"Delete record #{record_id}?")
+        if answer:
+            delete_record(record_id)
+
+
+def csv_text():
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(COLUMNS)
+    for row in DB.execute("SELECT id, name, category, value, notes, created_at FROM records ORDER BY id"):
+        writer.writerow([row[column] for column in COLUMNS])
+    return output.getvalue()
+
+
+def export_csv(_event=None):
+    try:
+        text = csv_text()
+        blob = window.Blob.new([text], {"type": "text/csv;charset=utf-8"})
+        url = window.URL.createObjectURL(blob)
+        anchor = document.createElement("a")
+        anchor.href = url
+        anchor.download = f"pydata-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        window.URL.revokeObjectURL(url)
+        set_message("CSV export completed.", "success")
+    except Exception as exc:
+        set_message(f"CSV export failed: {exc}", "error")
+
+
+def parse_csv(text):
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("The CSV file has no header row.")
+    normalized = {field.strip().lower(): field for field in reader.fieldnames if field}
+    required = {"name", "category"}
+    if not required.issubset(normalized):
+        raise ValueError("CSV must contain at least 'name' and 'category' columns.")
+
+    rows = []
+    for item in reader:
+        rows.append({
+            "name": (item.get(normalized["name"]) or "").strip(),
+            "category": (item.get(normalized["category"]) or "").strip(),
+            "value": (item.get(normalized.get("value", "")) or "").strip(),
+            "notes": (item.get(normalized.get("notes", "")) or "").strip(),
+        })
+    return rows
+
+
+async def import_csv(event):
+    try:
+        files = event.target.files
+        if not files or len(files) == 0:
+            return
+        text = await files.item(0).text()
+        records = parse_csv(text)
+        if not records:
+            raise ValueError("The CSV contains no data rows.")
+        for item in records:
+            item["name"] = validate_field(item["name"], "Name", 120)
+            item["category"] = validate_field(item["category"], "Category", 80)
+            item["value"] = item["value"][:160]
+            item["notes"] = item["notes"][:600]
+
+        DB.execute("DELETE FROM records")
+        DB.executemany(
+            """
+            INSERT INTO records (name, category, value, notes, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [(r["name"], r["category"], r["value"], r["notes"], now_string()) for r in records],
+        )
+        DB.commit()
+        refresh()
+        set_message(f"Imported {len(records)} record(s) from CSV.", "success")
+        trigger_htmx_refresh()
+    except Exception as exc:
+        set_message(f"CSV import failed: {exc}", "error")
+    finally:
+        event.target.value = ""
+
+
+def trigger_htmx_refresh():
+    # htmx remains useful for static apps through its client-side event system.
+    try:
+        if hasattr(window, "htmx") and window.htmx:
+            window.htmx.trigger(document.body, "pydata-updated")
+    except Exception:
+        pass
+
+
+def animate_rows():
+    """Ask Motion to animate freshly rendered rows."""
+    script = """
+      if (window.PyDataMotion) {
+        const rows = document.querySelectorAll('#data-body tr');
+        if (rows.length) {
+          window.PyDataMotion.animate(rows, { opacity: [0, 1], transform: ['translateY(6px)', 'translateY(0px)'] }, { duration: 0.22, delay: window.PyDataMotion.stagger(0.025), easing: 'ease-out' });
+        }
+      }
+    """
+    window.setTimeout(script_runner(script), 0)
+
+
+def animate_form_reset():
+    script = """
+      if (window.PyDataMotion) {
+        window.PyDataMotion.animate('#record-form', { opacity: [0.72, 1], transform: ['translateY(3px)', 'translateY(0px)'] }, { duration: 0.18, easing: 'ease-out' });
+      }
+    """
+    window.setTimeout(script_runner(script), 0)
+
+
+def script_runner(script):
+    """Create a JS callback proxy that evaluates a small UI-only snippet."""
+    def run(_value=None):
+        window.eval(script)
+    return ffi.create_proxy(run)
+
+
+# Event wiring using PyScript's current DOM interop API.
+el("save-button").addEventListener("click", ffi.create_proxy(save_record))
+el("clear-button").addEventListener("click", ffi.create_proxy(clear_form))
+el("refresh-button").addEventListener("click", ffi.create_proxy(refresh))
+el("export-button").addEventListener("click", ffi.create_proxy(export_csv))
+el("csv-input").addEventListener("change", ffi.create_proxy(import_csv))
+el("data-body").addEventListener("click", ffi.create_proxy(handle_table_click))
+el("search-input").addEventListener("input", ffi.create_proxy(refresh))
+document.addEventListener("pydata-refresh-requested", ffi.create_proxy(refresh))
+document.addEventListener("pydata-clear", ffi.create_proxy(clear_form))
+document.addEventListener("pydata-export", ffi.create_proxy(export_csv))
+
+init_db()
+refresh()
+
+# Enable controls after Python/SQLite is ready.
+for control in ("save-button", "export-button", "import-button", "refresh-button"):
+    set_disabled(control, False)
+
+set_text("engine-status", "Python + SQLite ready")
+el("engine-status").className = "inline-flex rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200"
+set_message("Database ready. All CRUD operations are running in PyScript.", "success")
+
+# Notify the UI after the initial database render.
+window.dispatchEvent(window.Event.new("pydata-ready"))
+  </script>
+
+  <script>
+    function pydataApp() {
+      return {
+        dark: false,
+        boot() {
+          const saved = localStorage.getItem('pydata-theme');
+          this.dark = saved === 'dark';
+          this.applyTheme();
+          const hero = document.getElementById('hero');
+          if (window.PyDataMotion && hero) {
+            window.PyDataMotion.animate(hero, { opacity: [0, 1], transform: ['translateY(-8px)', 'translateY(0px)'] }, { duration: .35, easing: 'ease-out' });
+          }
+        },
+        toggleTheme() {
+          this.dark = !this.dark;
+          localStorage.setItem('pydata-theme', this.dark ? 'dark' : 'light');
+          this.applyTheme();
+        },
+        applyTheme() {
+          document.documentElement.classList.toggle('dark', this.dark);
+        }
+      };
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.addEventListener('htmx:afterRequest', (event) => {
+        if (event.detail && event.detail.failed) {
+          console.warn('PyData HTMX event failed:', event.detail);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
